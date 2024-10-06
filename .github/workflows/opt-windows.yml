@@ -1,0 +1,65 @@
+# Need to do install first in order for the OSGi tests to work
+
+name: Modified Flowable Windows Build
+env:
+  MAVEN_ARGS: -B -V --no-transfer-progress -D http.keepAlive=false -D maven.wagon.http.pool=false
+    -D maven.wagon.httpconnectionManager.ttlSeconds=120
+jobs:
+  windows:
+    name: windows
+    runs-on: windows-latest
+    steps:
+    - name: Setup Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    - name: Install dependencies
+      run: |-
+        python -m pip install --upgrade pip
+        pip install inotify
+    - name: Run inotifywait
+      run: |-
+        python3 -c "
+        import inotify.adapters
+        import inotify.constants
+        import os
+        from datetime import datetime, timezone
+        with open('/home/runner/inotifywait-log-windows.csv', 'w') as log_file:
+          i = inotify.adapters.InotifyTree('/home/runner/work/flowable-engine/flowable-engine', inotify.constants.IN_CREATE | inotify.constants.IN_ACCESS)
+          for event in i.event_gen(yield_nones=False):
+            (_, type_names, path, filename) = event
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+            events = ','.join(type_names)
+            log_file.write(f'{now};{path};{filename};{events}\n')
+            log_file.flush()
+            os.fsync(log_file.fileno())
+        " &
+    - uses: actions/checkout@v4
+    - run: touch optcd-3.txt
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        distribution: zulu
+        java-version: 17
+    - run: touch optcd-4.txt
+    - name: Cache Maven Repository
+      uses: actions/cache@v3
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: ${{ runner.os }}-m2
+    - run: touch optcd-5.txt
+    - name: Install
+      run: ./mvnw install %MAVEN_ARGS% -D skipTests=true -D maven.javadoc.skip=true
+    - run: touch optcd-6.txt
+    - name: Test
+      run: ./mvnw verify -P distro,ui,errorLogging %MAVEN_ARGS% -D maven.test.redirectTestOutputToFile=false
+    - run: touch optcd-7.txt
+    - name: Upload inotifywait logs
+      uses: actions/upload-artifact@v4
+      with:
+        name: inotifywait-windows
+        path: /home/runner/inotifywait-log-windows.csv
+'on':
+- push
+- workflow_dispatch
